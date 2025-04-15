@@ -170,7 +170,7 @@ function M.filter_from_history()
     table.insert(lines, line)
   end
 
-  vim.ui.select(lines, { prompt = "Select filters from history:" }, function(idx)
+  vim.ui.select(lines, { prompt = "Select filters from history:" }, function(_, idx)
     if idx then
       M._do_filter(0, history[idx].filters)
     end
