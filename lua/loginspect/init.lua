@@ -2,6 +2,10 @@ local M = {}
 
 local history_file = vim.fn.stdpath("state") .. "/loginspect_history.json"
 
+local function escape_lua_pattern(str)
+  return str:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+end
+
 --- Load filter history from file.
 local function load_history()
   local f = io.open(history_file, "r")
@@ -49,7 +53,9 @@ function M._do_filter(buffer, filters)
   local result_lines = {}
   for _, line in ipairs(orig_lines) do
     for _, f in ipairs(filters) do
-      if string.find(line, f, 1, true) then
+      local pattern = escape_lua_pattern(f)
+      -- TODO: make case sensitivity configurable, maybe use smart case
+      if string.find(line:lower(), pattern:lower(), 1, true) then
         table.insert(result_lines, line)
         break
       end
