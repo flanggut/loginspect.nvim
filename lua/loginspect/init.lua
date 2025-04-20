@@ -1,6 +1,10 @@
 local M = {}
 
+local loginspect_namespace_id = vim.api.nvim_create_namespace("loginspect")
+
 local history_file = vim.fn.stdpath("state") .. "/loginspect_history.json"
+
+local marked_lines = {}
 
 local function escape_lua_pattern(str)
   return str:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
@@ -82,16 +86,24 @@ function M._do_filter(buffer, filters)
   vim.b.linefilter_filters = filters
   vim.b.linefilter_source_buf = buffer
 
+  -- 'K' to toggle highlight in the the current line
+  vim.keymap.set("n", "K", function()
+    local row = (vim.api.nvim_win_get_cursor(0))[1] - 1 -- 0 based index for row
+    if marked_lines[row] then
+      vim.api.nvim_buf_clear_namespace(new_buf, loginspect_namespace_id, row, row + 1)
+      marked_lines[row] = nil
+    else
+      -- Get exact line length to work around https://github.com/neovim/neovim/issues/19511
+      local line = vim.api.nvim_get_current_line()
+      vim.hl.range(new_buf, loginspect_namespace_id, "CursorLine", { row, 0 }, { row, #line }, { inclusive = true })
+      marked_lines[row] = true
+    end
+  end, { buffer = new_buf, noremap = true, silent = true, desc = "Toggle highlight of current line." })
+
+  -- '<leader>e' to edit current filters
+  vim.keymap.set("n", "<CR>", M.edit_active_filters, { buffer = new_buf, noremap = true, silent = true })
   -- 'q' to quit without action
   vim.api.nvim_buf_set_keymap(new_buf, "n", "q", "<cmd>bd!<CR>", { noremap = true, silent = true })
-  -- '<leader>e' to edit current filters
-  vim.api.nvim_buf_set_keymap(
-    new_buf,
-    "n",
-    "<leader>e",
-    ":lua require('loginspect').edit_active_filters() <cr>",
-    { noremap = true, silent = true }
-  )
 end
 
 --- @param initial_filters string[] Filters to apply, any line that matches any filter will be present in the output.
