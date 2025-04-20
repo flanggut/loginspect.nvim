@@ -4,11 +4,8 @@ local loginspect_namespace_id = vim.api.nvim_create_namespace("loginspect")
 
 local history_file = vim.fn.stdpath("state") .. "/loginspect_history.json"
 
+local active_filter_window = nil
 local marked_lines = {}
-
-local function escape_lua_pattern(str)
-  return str:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-end
 
 --- Load filter history from file.
 local function load_history()
@@ -35,7 +32,11 @@ local function save_history(history)
   f:close()
 end
 
--- Function to check if line matches any pattern in a list
+local function escape_lua_pattern(str)
+  return str:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+end
+
+--- Function to check if line matches any pattern in a list
 local function matches_any(line, patterns)
   for _, pat in ipairs(patterns) do
     -- TODO: make sure every string can contain complex chars
@@ -88,7 +89,7 @@ M._do_filter = function(buffer, filters)
   -- TODO: Add title to window
   local new_buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(new_buf, 0, -1, false, result_lines)
-  local _ = vim.api.nvim_open_win(new_buf, true, {
+  active_filter_window = vim.api.nvim_open_win(new_buf, true, {
     relative = "editor",
     width = vim.o.columns - 2,
     height = vim.o.lines - 2,
@@ -148,11 +149,6 @@ M._open_filter_window = function(initial_filters, source_buffer)
     title_pos = "center",
   })
 
-  local current_buffer = nil
-  if vim.b.linefilter_is_filtered then
-    current_buffer = vim.api.nvim_get_current_buf()
-  end
-
   -- 'q' to quit without action
   vim.api.nvim_buf_set_keymap(filter_buf, "n", "q", "<cmd>bd!<CR>", { noremap = true, silent = true })
 
@@ -168,12 +164,11 @@ M._open_filter_window = function(initial_filters, source_buffer)
       end
     end
     -- Close the filter buffer (and its window)
-    vim.api.nvim_win_close(0, true)
     vim.api.nvim_buf_delete(filter_buf, { force = true })
     -- Close the filtered buffer
-    if current_buffer then
-      vim.api.nvim_win_close(0, true)
-      vim.api.nvim_buf_delete(current_buffer, { force = true })
+    if active_filter_window then
+      vim.api.nvim_win_close(active_filter_window, true)
+      active_filter_window = nil
     end
 
     -- Apply new filters to source buffer.
