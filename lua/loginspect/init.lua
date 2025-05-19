@@ -134,7 +134,6 @@ function M._open_filter_window(initial_filters, source_buffer)
   vim.api.nvim_buf_set_lines(filter_buf, 0, -1, false, initial_filters)
 
   -- Open the buffer in a floating window
-  -- TODO: Display help / keybinds as virtual text
   local width = math.floor(vim.o.columns * 0.6)
   local height = #initial_filters + 5
   local row = math.floor((vim.o.lines - height) / 2)
@@ -232,11 +231,115 @@ function M.clear_filter_history()
   end
 end
 
+function M.run_async_command(cmd)
+  -- Create a new scratch buffer
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+  vim.api.nvim_buf_set_name(buf, "Async Command Output")
+
+  -- Open the buffer in a new split window
+  vim.cmd("vsplit")
+  vim.api.nvim_win_set_buf(0, buf)
+
+  -- Start the command using uv.spawn
+  local stdout = vim.uv.new_pipe(false)
+  local stderr = vim.uv.new_pipe(false)
+
+  local handle
+  local buffer_is_closed = false
+  local command_is_stopped = false
+
+  ---@diagnostic disable-next-line: missing-fields
+  handle = vim.uv.spawn(cmd[1], {
+    args = vim.list_slice(cmd, 2),
+    stdio = { nil, stdout, stderr },
+  }, function(code, signal)
+    -- Close pipes and handle
+    if stdout then
+      stdout:close()
+    end
+    if stderr then
+      stderr:close()
+    end
+    handle:close()
+
+    -- Write the exit code
+    vim.schedule(function()
+      if not buffer_is_closed and vim.api.nvim_buf_is_valid(buf) and not command_is_stopped then
+        vim.api.nvim_buf_set_lines(buf, -1, -1, false, {
+          "",
+          string.format("Process exited with code %d, signal %d", code, signal),
+        })
+      end
+    end)
+  end)
+
+  local function on_read(err, data)
+    if err then
+      vim.schedule(function()
+        if not buffer_is_closed and vim.api.nvim_buf_is_valid(buf) then
+          vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "ERROR: " .. err })
+        end
+      end)
+    end
+    if data then
+      local lines = vim.split(data, "\n", { plain = true })
+      vim.schedule(function()
+        if not buffer_is_closed and vim.api.nvim_buf_is_valid(buf) then
+          vim.api.nvim_buf_set_lines(buf, -1, -1, false, lines)
+        end
+      end)
+    end
+  end
+
+  -- Read stdout and stderr
+  ---@diagnostic disable-next-line: param-type-mismatch
+  vim.uv.read_start(stdout, on_read)
+  ---@diagnostic disable-next-line: param-type-mismatch
+  vim.uv.read_start(stderr, on_read)
+
+  -- Watch for buffer deletion or unload
+  vim.api.nvim_buf_attach(buf, false, {
+    on_detach = function()
+      buffer_is_closed = true
+      if handle and not handle:is_closing() then
+        handle:kill("sigkill")
+      end
+    end,
+  })
+
+  -- Buffer-local keybind: press 'q' to stop the command
+  vim.api.nvim_buf_set_keymap(buf, "n", "<leader>q", "", {
+    noremap = true,
+    silent = true,
+    callback = function()
+      if handle and not handle:is_closing() then
+        handle:kill("sigterm")
+        command_is_stopped = true
+        vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "", "Process stopped manually (SIGTERM)" })
+      end
+    end,
+    desc = "Stop async command",
+  })
+end
+
 --- Setup commands
 function M.setup(_)
   vim.api.nvim_create_user_command("LineFilter", M.filter_lines, {})
   vim.api.nvim_create_user_command("LineFilterHistory", M.filter_from_history, {})
   vim.api.nvim_create_user_command("LineFilterClearHistory", M.clear_filter_history, {})
+  vim.api.nvim_create_user_command("LineFilterRun", function(opts)
+    -- Split the arguments like a shell command line
+    local args = vim.fn.split(opts.args)
+    if #args == 0 then
+      print("Usage: :LineFilterRun <command>")
+      return
+    end
+    M.run_async_command(args)
+  end, {
+    nargs = "+", -- Requires at least one argument
+    complete = "shellcmd", -- Tab-complete like shell commands
+  })
 end
 
 return M
