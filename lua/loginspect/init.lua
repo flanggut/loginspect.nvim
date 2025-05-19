@@ -253,7 +253,7 @@ function M.run_async_command(cmd)
   handle = vim.uv.spawn(cmd[1], {
     args = vim.list_slice(cmd, 2),
     stdio = { nil, stdout, stderr },
-  }, function(code, signal)
+  }, function(code, signal) -- on_exit function
     -- Close pipes and handle
     if stdout then
       stdout:close()
@@ -284,6 +284,9 @@ function M.run_async_command(cmd)
     end
     if data then
       local lines = vim.split(data, "\n", { plain = true })
+      if #lines > 0 and lines[#lines] == "" then
+        table.remove(lines, #lines)
+      end
       vim.schedule(function()
         if not buffer_is_closed and vim.api.nvim_buf_is_valid(buf) then
           vim.api.nvim_buf_set_lines(buf, -1, -1, false, lines)
@@ -309,7 +312,7 @@ function M.run_async_command(cmd)
   })
 
   -- Buffer-local keybind: press 'q' to stop the command
-  vim.api.nvim_buf_set_keymap(buf, "n", "<leader>q", "", {
+  vim.api.nvim_buf_set_keymap(buf, "n", "q", "", {
     noremap = true,
     silent = true,
     callback = function()
